@@ -7,6 +7,7 @@ button{background:#2c2c30;color:#eee;border:1px solid #48484e;border-radius:10px
 #start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:24px}
 #go{width:120px;height:120px;border-radius:50%;background:#d85a30;border:none;color:#fff;font-size:18px;font-weight:700}
 #caps{display:flex;gap:8px}.cap{font-size:12px;padding:4px 10px;border-radius:999px}.cap.ok{background:#0F6E56;color:#E1F5EE}.cap.no{background:#791F1F;color:#FCEBEB}
+#chrome{align-items:center;gap:8px;background:#fff;color:#16161a;border-radius:24px;padding:12px 22px;font-weight:700;text-decoration:none}#chrome:active{transform:scale(.94)}
 #msg{color:#f09595;font-size:12px;text-align:center;max-width:320px}
 #ov{display:none;position:fixed;inset:0}
 #ov .top{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 16px 10px;background:linear-gradient(#000a,#0000);font-variant-numeric:tabular-nums}
@@ -36,7 +37,7 @@ tr.sel{background:#2a1d18}td input{width:100%;background:transparent;border:none
 @media(min-width:900px){#rev{display:none;flex-direction:row;flex-wrap:wrap}#rev .hd{width:100%}#top,#r3{width:60%;height:calc(100vh - 60px)}#side{width:40%;height:calc(100vh - 60px);overflow:auto}}
 </style></head><body>
 <div id="xr"></div>
-<div id="start"><div id="caps"></div><button id="go" disabled>시작</button><button id="op">열기</button><div id="msg"></div></div>
+<div id="start"><div id="caps"></div><button id="go" disabled>시작</button><a id="chrome" style="display:none">크롬으로 열기</a><button id="op">열기</button><div id="msg"></div></div>
 <div id="ov"><div class="top"><span id="tm">00:00</span><span id="fl"></span><span id="cnt"></span></div>
 <canvas id="mm" width="240" height="240"></canvas><div class="bot"><button id="lv" data-l="1"><i></i><i></i><i></i></button><button id="stop">완료</button><button id="pin">핀</button></div></div>
 <div id="rev"><div class="hd"><button id="mtop" class="on">위</button><button id="m3d">3D</button><span id="rinfo"></span><button id="sv">저장</button><button id="op2">열기</button><button id="new">새로</button></div>
@@ -79,7 +80,10 @@ function pinSprite(n){const c=document.createElement('canvas');c.width=128;c.hei
 async function checkSupport(){const out={xr:!!navigator.xr,ar:false,secure:window.isSecureContext};
  try{out.ar=out.xr&&await navigator.xr.isSessionSupported('immersive-ar');}catch(e){}
  const b=$('caps');b.innerHTML='';[['AR',out.ar],['HTTPS',out.secure]].forEach(([k,v])=>{const s=document.createElement('span');s.className='cap '+(v?'ok':'no');s.textContent=k;b.append(s);});
- $('go').disabled=!out.ar;return out;}
+ $('go').disabled=!out.ar;
+ const ua=navigator.userAgent,android=/Android/i.test(ua),notChrome=/SamsungBrowser|KAKAOTALK|NAVER|Whale|Line\/|Instagram|FBAN|FBAV|DaumApps|; wv\)|EdgA|OPR\//i.test(ua)||!/Chrome\//.test(ua);
+ if(android&&notChrome){const u=location.host+location.pathname+location.search;const a=$('chrome');a.href=`intent://${u}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(location.href)};end`;a.style.display='inline-flex';}
+ return out;}
 
 // ---------- session ----------
 async function start(){try{
