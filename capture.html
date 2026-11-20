@@ -1,0 +1,90 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>현장 촬영</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%;background:#000;color:#eee;font-family:system-ui,-apple-system,"Malgun Gothic",sans-serif;overflow:hidden}
+video#pv{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+#edge{position:fixed;inset:0;pointer-events:none;border:0 solid transparent;transition:border-color .15s,border-width .15s}
+#edge.g{border:6px solid rgba(29,158,117,.85)}#edge.y{border:8px solid rgba(239,159,39,.9)}#edge.r{border:14px solid rgba(226,75,74,.95)}
+#top{position:fixed;top:0;left:0;right:0;display:flex;align-items:center;gap:10px;padding:calc(12px + env(safe-area-inset-top)) 16px 10px;background:linear-gradient(#000a,#0000);font-variant-numeric:tabular-nums}
+#tm{font-weight:700;font-size:17px;display:none}#tm:before{content:'';display:inline-block;width:10px;height:10px;border-radius:50%;background:#e24b4a;margin-right:8px;vertical-align:1px}
+#spd{margin-left:auto;width:110px;height:8px;border-radius:4px;background:#ffffff33;overflow:hidden}#spd i{display:block;height:100%;width:0;background:#1D9E75;transition:width .1s,background .1s}
+#ring{position:fixed;left:calc(14px + env(safe-area-inset-left));top:calc(52px + env(safe-area-inset-top));width:128px;height:128px}
+#bot{position:fixed;right:0;left:0;bottom:0;display:flex;justify-content:center;align-items:center;padding:18px 18px calc(28px + env(safe-area-inset-bottom))}
+#rec{width:78px;height:78px;border-radius:50%;border:5px solid #fff;background:transparent;padding:0;display:flex;align-items:center;justify-content:center;transition:transform .08s}
+#rec:active{transform:scale(.9)}#rec span{width:58px;height:58px;border-radius:50%;background:#e24b4a;transition:all .2s}#rec.on span{width:28px;height:28px;border-radius:7px}
+#start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#16161a;z-index:5}
+#start button{background:#d85a30;border:none;color:#fff;font-size:18px;font-weight:700;border-radius:50%;width:120px;height:120px}
+#start button:active{transform:scale(.94)}#err{color:#f09595;font-size:13px;max-width:320px;text-align:center}
+#done{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#16161add;z-index:6;padding:24px;text-align:center}
+#done a,#done button{display:inline-flex;align-items:center;justify-content:center;min-width:180px;padding:12px 18px;border-radius:24px;font-weight:700;text-decoration:none;font-size:15px;border:none}
+#done a{background:#fff;color:#16161a}#done button{background:#2c2c30;color:#eee;border:1px solid #48484e}
+#dinfo{color:#bbb;font-size:13px}
+@media (orientation:landscape){#bot{left:auto;top:0;bottom:0;right:0;width:130px;padding:12px calc(18px + env(safe-area-inset-right)) 12px 12px}#ring{top:auto;bottom:calc(16px + env(safe-area-inset-bottom));width:124px;height:124px}}
+</style></head><body>
+<video id="pv" playsinline muted autoplay></video><div id="edge"></div>
+<div id="top"><span id="tm">00:00</span><div id="spd"><i></i></div></div>
+<canvas id="ring" width="300" height="300"></canvas>
+<div id="bot"><button id="rec"><span></span></button></div>
+<div id="start"><button id="go">시작</button><div id="err"></div></div>
+<div id="done"><div id="dinfo"></div><a id="dv" download>영상 저장</a><a id="ds" download>기록 저장</a><button id="again">다시</button></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+let stream=null,rec=null,chunks=[],recOn=false,t0=0,log=[],ori=null,rate=null,spd=0,blurBad=0;
+const SECT=36,BANDS=3,dwell=new Float32Array(SECT*BANDS);let lastT=performance.now();
+// ---------- start ----------
+$('go').onclick=async()=>{try{
+  if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){try{await DeviceOrientationEvent.requestPermission();}catch(e){}}
+  if(typeof DeviceMotionEvent!=='undefined'&&DeviceMotionEvent.requestPermission){try{await DeviceMotionEvent.requestPermission();}catch(e){}}
+  stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}}});
+  $('pv').srcObject=stream;await $('pv').play();$('start').style.display='none';
+  addEventListener('deviceorientation',e=>{if(e.alpha!==null)ori={a:e.alpha,b:e.beta,g:e.gamma};});
+  addEventListener('devicemotion',e=>{const r=e.rotationRate;if(r&&r.alpha!==null)rate={a:r.alpha,b:r.beta,g:r.gamma};});
+  loop();
+ }catch(e){$('err').textContent=String(e.message||e);}};
+// ---------- orientation -> view direction ----------
+function viewDir(o){if(!o)return null;const d=Math.PI/180,a=o.a*d,b=o.b*d,g=o.g*d;const ca=Math.cos(a),sa=Math.sin(a),cb=Math.cos(b),sb=Math.sin(b),cg=Math.cos(g),sg=Math.sin(g);
+ // device -Z axis in earth frame (W3C ZXY rotation)
+ const x=-(ca*sg+sa*sb*cg),y=-(sa*sg-ca*sb*cg),z=-(cb*cg);return[x,y,z];}
+// ---------- sharpness ----------
+const sc=document.createElement('canvas');sc.width=96;sc.height=54;const sg=sc.getContext('2d',{willReadFrequently:true});let sharpHist=[];
+function sharp(){const v=$('pv');if(!v.videoWidth)return null;sg.drawImage(v,0,0,96,54);const d=sg.getImageData(0,0,96,54).data;let s=0,n=0;
+ for(let y=1;y<53;y++)for(let x=1;x<95;x++){const i=(y*96+x)*4,c=d[i+1];const l=4*c-d[i-3]-d[i+5]-d[i-96*4+1]-d[i+96*4+1];s+=l*l;n++;}return s/n;}
+// ---------- loop ----------
+let lastSharp=0,lastVib=0,lastLog=0;
+function loop(){requestAnimationFrame(loop);const now=performance.now(),dt=Math.min(0.1,(now-lastT)/1000);lastT=now;
+ const r=rate?Math.hypot(rate.a,rate.b,rate.g):0;spd=spd*0.8+r*0.2;
+ if(now-lastSharp>200){lastSharp=now;const s=sharp();if(s!==null){sharpHist.push(s);if(sharpHist.length>40)sharpHist.shift();const med=[...sharpHist].sort((a,b)=>a-b)[Math.floor(sharpHist.length/2)];blurBad=s<med*0.45?1:0;}}
+ let lvl=spd<35?0:spd<70?1:2;if(blurBad&&lvl<1)lvl=1;
+ $('edge').className=recOn?['g','y','r'][lvl]:'';const bar=$('spd').firstElementChild;bar.style.width=Math.min(100,spd/90*100)+'%';bar.style.background=['#1D9E75','#EF9F27','#E24B4A'][lvl];
+ if(recOn&&lvl===2&&now-lastVib>700&&navigator.vibrate){navigator.vibrate(90);lastVib=now;}
+ const vd=viewDir(ori);let yaw=null,pit=null;
+ if(vd){yaw=(Math.atan2(vd[0],vd[1])*180/Math.PI+360)%360;pit=Math.asin(Math.max(-1,Math.min(1,vd[2])))*180/Math.PI;
+  if(recOn&&lvl===0){const band=pit<-25?0:pit>20?2:1;const sct=Math.floor(yaw/(360/SECT))%SECT;for(const ds of[-1,0,1]){const k=band*SECT+((sct+ds+SECT)%SECT);dwell[k]+=dt*(ds===0?1:0.5);}}}
+ drawRing(yaw,pit);
+ if(recOn){const t=(now-t0)/1000;$('tm').textContent=`${String(Math.floor(t/60)).padStart(2,'0')}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+  if(now-lastLog>33){lastLog=now;log.push([+t.toFixed(3),ori?+ori.a.toFixed(2):null,ori?+ori.b.toFixed(2):null,ori?+ori.g.toFixed(2):null,rate?+rate.a.toFixed(1):null,rate?+rate.b.toFixed(1):null,rate?+rate.g.toFixed(1):null,lvl]);}}}
+function drawRing(yaw,pit){const c=$('ring'),g=c.getContext('2d'),W=c.width,cx=W/2,cy=W/2;g.clearRect(0,0,W,W);
+ g.fillStyle='rgba(0,0,0,.45)';g.beginPath();g.arc(cx,cy,W/2-2,0,7);g.fill();
+ const R=[[30,62],[66,100],[104,138]];const rot=yaw!==null?-yaw*Math.PI/180:0;
+ for(let b=0;b<BANDS;b++)for(let s=0;s<SECT;s++){const v=Math.min(1,dwell[b*SECT+s]/0.6);const a0=rot+(s/SECT)*2*Math.PI-Math.PI/2,a1=a0+2*Math.PI/SECT-0.02;
+  g.fillStyle=v>0?`rgba(93,202,165,${0.25+0.65*v})`:'rgba(255,255,255,.12)';g.beginPath();g.arc(cx,cy,R[b][1],a0,a1);g.arc(cx,cy,R[b][0],a1,a0,true);g.closePath();g.fill();}
+ if(yaw!==null){const band=pit<-25?0:pit>20?2:1;g.strokeStyle='#fff';g.lineWidth=4;g.beginPath();g.arc(cx,cy,(R[band][0]+R[band][1])/2,-Math.PI/2-0.12,-Math.PI/2+0.12);g.stroke();
+  g.fillStyle='#fff';g.beginPath();g.moveTo(cx,cy-24);g.lineTo(cx-8,cy-8);g.lineTo(cx+8,cy-8);g.closePath();g.fill();}}
+// ---------- record ----------
+function pickMime(){for(const m of['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'])if(window.MediaRecorder&&MediaRecorder.isTypeSupported(m))return m;return'';}
+$('rec').onclick=()=>{if(navigator.vibrate)navigator.vibrate(15);if(!recOn)startRec();else stopRec();};
+function startRec(){if(!stream)return;chunks=[];log=[];dwell.fill(0);const mime=pickMime();try{rec=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:12e6}:{});}catch(e){rec=new MediaRecorder(stream);}
+ rec.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};rec.onstop=finish;rec.start(1000);recOn=true;t0=performance.now();$('rec').classList.add('on');$('tm').style.display='inline';}
+function stopRec(){recOn=false;$('rec').classList.remove('on');$('tm').style.display='none';$('edge').className='';rec.stop();}
+function finish(){const type=rec.mimeType||'video/webm',ext=type.includes('mp4')?'mp4':'webm';const blob=new Blob(chunks,{type});const d=new Date();
+ const base=`현장촬영_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`;
+ const tr=stream.getVideoTracks()[0],set=tr.getSettings?tr.getSettings():{};
+ const meta={app:'현장촬영',v:1,start:new Date(Date.now()-((performance.now()-t0))).toISOString(),dur:log.length?log[log.length-1][0]:0,video:{file:base+'.'+ext,type,w:set.width,h:set.height,fps:set.frameRate},ua:navigator.userAgent,
+  cols:['t','alpha','beta','gamma','rotA','rotB','rotG','lvl'],log,coverage:Array.from(dwell).map(v=>+v.toFixed(2))};
+ $('dv').href=URL.createObjectURL(blob);$('dv').download=base+'.'+ext;$('ds').href=URL.createObjectURL(new Blob([JSON.stringify(meta)],{type:'application/json'}));$('ds').download=base+'.json';
+ const fast=log.filter(r=>r[7]===2).length/Math.max(1,log.length);
+ $('dinfo').textContent=`${Math.round(meta.dur)}초 · ${(blob.size/1e6).toFixed(0)} MB · ${set.width||'?'}×${set.height||'?'} · 빠름 ${(fast*100).toFixed(0)}%`;$('done').style.display='flex';}
+$('again').onclick=()=>{$('done').style.display='none';};
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&recOn)stopRec();});
+</script></body></html>
