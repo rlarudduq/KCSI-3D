@@ -1,0 +1,37 @@
+name: Build KCSI Scene Scan from ZIP
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['KCSI_SceneScan_v01.zip', '.github/workflows/build.yml']
+permissions:
+  contents: read
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Unpack source
+        run: unzip -q KCSI_SceneScan_v01.zip -d source
+      - name: Android SDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Test independent geometry
+        working-directory: source/KCSI_SceneScan_v01
+        run: bash tests/run.sh
+      - name: Build APK
+        working-directory: source/KCSI_SceneScan_v01
+        run: gradle --no-daemon :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KCSI-SceneScan-v0.1-debug
+          path: source/KCSI_SceneScan_v01/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
